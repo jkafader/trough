@@ -6,7 +6,6 @@ import ujson
 import os
 import sqlparse
 import logging
-import requests
 import urllib
 import doublethink
 
@@ -25,15 +24,18 @@ class ReadServer:
         trough.sync.init(self.rethinker)
 
     def proxy_for_write_host(self, node, segment, query, start_response):
+        query = query.encode('utf-8')
         # enforce that we are querying the correct database, send an explicit hostname.
         write_url = "http://{node}:{port}/?segment={segment}".format(node=node, segment=segment.id, port=settings['READ_PORT'])
-        with requests.post(write_url, stream=True, data=query) as r:
-            status_line = '{status_code} {reason}'.format(status_code=r.status_code, reason=r.reason)
-            # headers [('Content-Type','application/json')]
-            headers = [("Content-Type", r.headers['Content-Type'],)]
-            start_response(status_line, headers)
-            for chunk in r.iter_content():
-                yield chunk
+        try:
+            request = urllib.request.Request(write_url, data=query)
+            with urllib.request.urlopen(request) as response:
+                status_line = '{status_code} {reason}'.format(status_code=response.status_code, reason=response.reason)
+                headers = [("Content-Type", response.headers['Content-Type'],)]
+                start_response(status_line, headers)
+                return response.read()
+        except (urllib.error.URLError, urllib.error.HTTPError) as e:
+            print("An error occurred while proxying for host %s for segment %s: %s" % (node, segment, e))
 
     def sql_result_json_iter(self, cursor):
         first = True
@@ -87,13 +89,6 @@ class ReadServer:
                 logging.info('Found write lock for {segment}. Proxying {query} to {host}'.format(segment=segment.id, query=query, host=write_lock['node']))
                 return self.proxy_for_write_host(write_lock['node'], segment, query, start_response)
 
-                ## # enforce that we are querying the correct database, send an explicit hostname.
-                ## write_url = "http://{node}:{port}/?segment={segment}".format(node=node, segment=segment.id, port=settings['READ_PORT'])
-                ## with requests.post(write_url, stream=True, data=query) as r:
-                ##     status_line = '{status_code} {reason}'.format(status_code=r.status_code, reason=r.reason)
-                ##     headers = [("Content-Type", r.headers['Content-Type'],)]
-                ##     start_response(status_line, headers)
-                ##     return r.iter_content()
             cursor = self.execute_query(segment, query)
             start_response('200 OK', [('Content-Type','application/json')])
             return self.sql_result_json_iter(cursor)
