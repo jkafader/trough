@@ -1,5 +1,5 @@
 protobuf==3.7.1
-PyYAML==5.1
+PyYAML==5.4
 requests==2.21.0
 six==1.10.0
 snakebite-py3==3.0.1
